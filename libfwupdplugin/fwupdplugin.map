@@ -1040,5 +1040,6 @@ LIBFWUPDPLUGIN_1.8.1 {
     fu_device_poll_locker_new;
     fu_plugin_runner_init;
     fu_udev_device_ioctl_full;
+    fu_archive_new_from_bytes;
   local: *;
 } LIBFWUPDPLUGIN_1.8.0;

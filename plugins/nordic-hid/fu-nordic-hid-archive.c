@@ -38,7 +38,7 @@ fu_nordic_hid_archive_parse(FuFirmware *firmware,
 	g_autoptr(JsonParser) parser = json_parser_new();
 
 	/* load archive */
-	archive = fu_archive_new(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
+	archive = fu_archive_new_from_bytes(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
 	if (archive == NULL)
 		return FALSE;
 	manifest = fu_archive_lookup_by_fn(archive, "manifest.json", error);

@@ -1015,7 +1015,7 @@ fu_mm_device_write_firmware_qmi_pdc(FuDevice *device,
 	};
 
 	/* decompress entire archive ahead of time */
-	archive = fu_archive_new(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
+	archive = fu_archive_new_from_bytes(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
 	if (archive == NULL)
 		return FALSE;
 
@@ -1197,7 +1197,7 @@ fu_mm_device_write_firmware_mbim_qdu(FuDevice *device,
 	g_autoptr(XbSilo) silo = NULL;
 
 	/* decompress entire archive ahead of time */
-	archive = fu_archive_new(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
+	archive = fu_archive_new_from_bytes(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
 	if (archive == NULL)
 		return FALSE;
 
@@ -1502,7 +1502,7 @@ fu_mm_device_write_firmware_firehose(FuDevice *device,
 	fu_progress_add_step(progress, FWUPD_STATUS_DEVICE_WRITE, 90);
 
 	/* decompress entire archive ahead of time */
-	archive = fu_archive_new(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
+	archive = fu_archive_new_from_bytes(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
 	if (archive == NULL)
 		return FALSE;
 

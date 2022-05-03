@@ -42,10 +42,34 @@ typedef gboolean (*FuArchiveIterateFunc)(FuArchive *self,
 					 gpointer user_data,
 					 GError **error) G_GNUC_WARN_UNUSED_RESULT;
 
+/**
+ * FuArchiveEntryIterateFunc:
+ * @self: a #FuArchive
+ * @filename: a filename
+ * @user_data: user data
+ * @error: a #GError or NULL
+ *
+ * The archive entry iteration callback.
+ */
+typedef GBytes *(*FuArchiveEntryIterateFunc)(FuArchive *self,
+					     const gchar **filename,
+					     gpointer user_data,
+					     GError **error)G_GNUC_WARN_UNUSED_RESULT;
+
 FuArchive *
-fu_archive_new(GBytes *data, FuArchiveFlags flags, GError **error) G_GNUC_WARN_UNUSED_RESULT;
+fu_archive_new(void) G_GNUC_WARN_UNUSED_RESULT;
+FuArchive *
+fu_archive_new_from_bytes(GBytes *data,
+			  FuArchiveFlags flags,
+			  GError **error) G_GNUC_WARN_UNUSED_RESULT;
 GBytes *
 fu_archive_lookup_by_fn(FuArchive *self, const gchar *fn, GError **error) G_GNUC_WARN_UNUSED_RESULT;
+GBytes *
+fu_archive_get_bytes(FuArchive *self,
+		     const gchar *compress,
+		     FuArchiveEntryIterateFunc callback,
+		     gpointer user_data,
+		     GError **error) G_GNUC_WARN_UNUSED_RESULT;
 gboolean
 fu_archive_iterate(FuArchive *self,
 		   FuArchiveIterateFunc callback,

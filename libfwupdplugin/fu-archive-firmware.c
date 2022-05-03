@@ -35,6 +35,11 @@ fu_archive_firmware_parse_cb(FuArchive *self,
 	return TRUE;
 }
 
+typedef struct {
+	GPtrArray *array;
+	guint index;
+} FuArchiveFirmwareIter;
+
 static gboolean
 fu_archive_firmware_parse(FuFirmware *firmware,
 			  GBytes *fw,
@@ -46,12 +51,43 @@ fu_archive_firmware_parse(FuFirmware *firmware,
 	g_autoptr(FuArchive) archive = NULL;
 
 	/* load archive */
-	archive = fu_archive_new(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
+	archive = fu_archive_new_from_bytes(fw, FU_ARCHIVE_FLAG_IGNORE_PATH, error);
 	if (archive == NULL)
 		return FALSE;
 
 	/* decompress each image in the archive */
 	return fu_archive_iterate(archive, fu_archive_firmware_parse_cb, firmware, error);
+}
+
+/* TODO: Create an FuAchiveEntry to replace the filename by an entry structure? */
+static GBytes *
+fu_archive_firmware_write_cb(FuArchive *self,
+			     const gchar **filename,
+			     gpointer user_data,
+			     GError **error)
+{
+	FuArchiveFirmwareIter *iter = (FuArchiveFirmwareIter *)user_data;
+	if (iter->index < iter->array->len) {
+		FuFirmware *img = g_ptr_array_index(iter->array, iter->index++);
+		*filename =  fu_firmware_get_id(img);
+		return fu_firmware_get_bytes(img, error);
+	}
+	*filename = NULL;
+	return g_bytes_new(NULL, 0);
+}
+
+static GBytes *
+fu_archive_firmware_write(FuFirmware *firmware, GError **error)
+{
+	FuArchiveFirmwareIter iter;
+	g_autoptr(FuArchive) archive = NULL;
+	g_autoptr(GPtrArray) images = fu_firmware_get_images(firmware);
+
+	/* save archive and compress each image to the archive */
+	iter.index = 0;
+	iter.array = images;
+	archive = fu_archive_new();
+	return fu_archive_get_bytes(archive, "gzip", fu_archive_firmware_write_cb, &iter, error);
 }
 
 static void
@@ -64,6 +100,7 @@ fu_archive_firmware_class_init(FuArchiveFirmwareClass *klass)
 {
 	FuFirmwareClass *klass_firmware = FU_FIRMWARE_CLASS(klass);
 	klass_firmware->parse = fu_archive_firmware_parse;
+	klass_firmware->write = fu_archive_firmware_write;
 }
 
 /**

@@ -28,6 +28,8 @@
 struct _FuArchive {
 	GObject parent_instance;
 	GHashTable *entries;
+	gpointer ctx;
+	GByteArray *blob;
 };
 
 G_DEFINE_TYPE(FuArchive, fu_archive, G_TYPE_OBJECT)
@@ -70,23 +72,23 @@ fu_archive_init(FuArchive *self)
 GBytes *
 fu_archive_lookup_by_fn(FuArchive *self, const gchar *fn, GError **error)
 {
-	GBytes *fw;
+	GBytes *bytes;
 
 	g_return_val_if_fail(FU_IS_ARCHIVE(self), NULL);
 	g_return_val_if_fail(fn != NULL, NULL);
 	g_return_val_if_fail(error == NULL || *error == NULL, NULL);
 
-	fw = g_hash_table_lookup(self->entries, fn);
-	if (fw == NULL) {
+	bytes = g_hash_table_lookup(self->entries, fn);
+	if (bytes == NULL) {
 		g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "no blob for %s", fn);
 	}
-	return fw;
+	return bytes;
 }
 
 /**
  * fu_archive_iterate:
  * @self: a #FuArchive
- * @callback: (scope call): a #FuArchiveIterateFunc.
+ * @callback: a #FuArchiveIterateFunc.
  * @user_data: user data
  * @error: (nullable): optional return location for an error
  *
@@ -130,6 +132,27 @@ _archive_read_ctx_free(_archive_read_ctx *arch)
 }
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(_archive_read_ctx, _archive_read_ctx_free)
+
+typedef struct archive _archive_write_ctx;
+
+static void
+_archive_write_ctx_free(_archive_write_ctx *arch)
+{
+	archive_write_close(arch);
+	archive_write_free(arch);
+}
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(_archive_write_ctx, _archive_write_ctx_free)
+
+typedef struct archive_entry _archive_entry_ctx;
+
+static void
+_archive_entry_ctx_free(_archive_entry_ctx *entry)
+{
+	archive_entry_free(entry);
+}
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(_archive_entry_ctx, _archive_entry_ctx_free)
 #endif
 
 static gboolean
@@ -162,7 +185,7 @@ fu_archive_load(FuArchive *self, GBytes *blob, FuArchiveFlags flags, GError **er
 		return FALSE;
 	}
 	while (TRUE) {
-		const gchar *fn;
+		const gchar *fn = NULL;
 		gint64 bufsz;
 		gssize rc;
 		struct archive_entry *entry;
@@ -234,8 +257,136 @@ fu_archive_load(FuArchive *self, GBytes *blob, FuArchiveFlags flags, GError **er
 #endif
 }
 
+static GByteArray *
+fu_archive_save(FuArchive *self,
+		const gchar *compress,
+		FuArchiveEntryIterateFunc callback,
+		gpointer user_data,
+		GError **error)
+{
+#ifdef HAVE_LIBARCHIVE
+	const gchar *fn;
+	gsize blobsz;
+	size_t size;
+	int r;
+	g_autoptr(GByteArray) blob = NULL;
+	g_autoptr(_archive_write_ctx) arch = NULL;
+
+	blobsz = 0x20000;
+	blob = g_byte_array_sized_new(blobsz);
+
+	/* compress anything matching either glob */
+	arch = archive_write_new();
+	if (arch == NULL) {
+		g_set_error_literal(error,
+				    G_IO_ERROR,
+				    G_IO_ERROR_NOT_SUPPORTED,
+				    "libarchive startup failed");
+		return NULL;
+	}
+	archive_write_add_filter_by_name(arch, compress);
+	archive_write_set_format_pax_restricted(arch);
+	r = archive_write_open_memory(arch, blob->data, blobsz, &size);
+	if (r != 0) {
+		g_set_error(error,
+			    G_IO_ERROR,
+			    G_IO_ERROR_NOT_SUPPORTED,
+			    "cannot open: %s",
+			    archive_error_string(arch));
+		return NULL;
+	}
+
+	while (TRUE) {
+		GBytes *bytes;
+		gint64 bufsz;
+		const guint8 *buf;
+		ssize_t rc;
+		g_autoptr(_archive_entry_ctx) entry = NULL;
+
+		bytes = callback(self, &fn, user_data, error);
+		if (bytes == NULL)
+			return NULL;
+
+		buf = g_bytes_get_data(bytes, NULL);
+		bufsz = g_bytes_get_size(bytes);
+
+		if (fn == NULL)
+			break;
+
+		entry = archive_entry_new();
+		archive_entry_set_pathname(entry, fn);
+		archive_entry_set_filetype(entry, AE_IFREG);
+		archive_entry_set_perm(entry, 0644);
+		archive_entry_set_size(entry, bufsz);
+
+		r = archive_write_header(arch, entry);
+		if (r != 0) {
+			g_set_error(error,
+				    G_IO_ERROR,
+				    G_IO_ERROR_NOT_SUPPORTED,
+				    "cannot write header: %s",
+				    archive_error_string(arch));
+			return NULL;
+		}
+
+		rc = archive_write_data(arch, buf, bufsz);
+		if (rc < 0) {
+			g_set_error(error,
+				    G_IO_ERROR,
+				    G_IO_ERROR_FAILED,
+				    "cannot write data: %s",
+				    archive_error_string(arch));
+			return NULL;
+		}
+		if (rc != bufsz) {
+			g_set_error(error,
+				    G_IO_ERROR,
+				    G_IO_ERROR_FAILED,
+				    "write %" G_GSSIZE_FORMAT " of %" G_GINT64_FORMAT,
+				    rc,
+				    bufsz);
+			return NULL;
+		}
+	}
+
+	r = archive_write_close(arch);
+	if (r != 0) {
+		g_set_error(error,
+			    G_IO_ERROR,
+			    G_IO_ERROR_NOT_SUPPORTED,
+			    "cannot close: %s",
+			    archive_error_string(arch));
+		return NULL;
+	}
+
+	/* success */
+	g_byte_array_set_size(blob, size); /* FIXME: is it correct? */
+	return g_steal_pointer(&blob);
+#else
+	g_set_error_literal(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_NOT_SUPPORTED,
+			    "missing libarchive support");
+	return FALSE;
+#endif
+}
+
 /**
  * fu_archive_new:
+ *
+ * TODO
+ *
+ * Since: 1.8.1
+ **/
+FuArchive *
+fu_archive_new(void)
+{
+	g_autoptr(FuArchive) self = g_object_new(FU_TYPE_ARCHIVE, NULL);
+	return g_steal_pointer(&self);
+}
+
+/**
+ * fu_archive_new_from_bytes:
  * @data: archive contents
  * @flags: archive flags, e.g. %FU_ARCHIVE_FLAG_NONE
  * @error: (nullable): optional return location for an error
@@ -247,7 +398,7 @@ fu_archive_load(FuArchive *self, GBytes *blob, FuArchiveFlags flags, GError **er
  * Since: 1.2.2
  **/
 FuArchive *
-fu_archive_new(GBytes *data, FuArchiveFlags flags, GError **error)
+fu_archive_new_from_bytes(GBytes *data, FuArchiveFlags flags, GError **error)
 {
 	g_autoptr(FuArchive) self = g_object_new(FU_TYPE_ARCHIVE, NULL);
 	g_return_val_if_fail(data != NULL, NULL);
@@ -255,4 +406,30 @@ fu_archive_new(GBytes *data, FuArchiveFlags flags, GError **error)
 	if (!fu_archive_load(self, data, flags, error))
 		return NULL;
 	return g_steal_pointer(&self);
+}
+
+/**
+ * fu_archive_get_bytes:
+ * @callback: a #FuArchiveEntryIterateFunc.
+ * @user_data: user data
+ * @error: (nullable): optional return location for an error
+ *
+ * TODO
+ *
+ * Since: 1.8.1
+ **/
+GBytes *
+fu_archive_get_bytes(FuArchive *self,
+		     const gchar *compress,
+		     FuArchiveEntryIterateFunc callback,
+		     gpointer user_data,
+		     GError **error)
+{
+	g_autoptr(GByteArray) data = NULL;
+	g_return_val_if_fail(callback != NULL, NULL);
+	g_return_val_if_fail(error == NULL || *error == NULL, NULL);
+	data = fu_archive_save(self, compress, callback, user_data, error);
+	if (data == NULL)
+		return NULL;
+	return g_byte_array_free_to_bytes(g_steal_pointer(&data));
 }

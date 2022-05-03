@@ -204,7 +204,7 @@ fu_plugin_uefi_capsule_get_splash_data(guint width, guint height, GError **error
 	blob_archive = fu_common_get_contents_bytes(filename_archive, error);
 	if (blob_archive == NULL)
 		return NULL;
-	archive = fu_archive_new(blob_archive, FU_ARCHIVE_FLAG_NONE, error);
+	archive = fu_archive_new_from_bytes(blob_archive, FU_ARCHIVE_FLAG_NONE, error);
 	if (archive == NULL)
 		return NULL;
 
