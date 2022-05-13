@@ -6243,6 +6243,7 @@ fu_engine_backend_device_removed_cb(FuBackend *backend, FuDevice *device, FuEngi
 				fu_device_get_name(device_tmp),
 				fu_device_get_id(device_tmp));
 			fu_device_list_remove(self->device_list, device_tmp);
+			fu_engine_emit_changed(self);
 		}
 	}
 }
