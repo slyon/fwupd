@@ -1989,7 +1989,6 @@ fu_util_get_updates(FuUtilPrivate *priv, gchar **values, GError **error)
 	gboolean supported = FALSE;
 	g_autoptr(GNode) root = g_node_new(NULL);
 	g_autofree gchar *title = fu_util_get_tree_title(priv);
-	g_autoptr(GPtrArray) devices_inhibited = g_ptr_array_new();
 	g_autoptr(GPtrArray) devices_no_support = g_ptr_array_new();
 	g_autoptr(GPtrArray) devices_no_upgrades = g_ptr_array_new();
 
@@ -2038,10 +2037,6 @@ fu_util_get_updates(FuUtilPrivate *priv, gchar **values, GError **error)
 			continue;
 		}
 		supported = TRUE;
-		if (fwupd_device_has_flag(dev, FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN)) {
-			g_ptr_array_add(devices_inhibited, dev);
-			continue;
-		}
 
 		/* get the releases for this device and filter for validity */
 		rels = fwupd_client_get_upgrades(priv->client,
@@ -2079,16 +2074,6 @@ fu_util_get_updates(FuUtilPrivate *priv, gchar **values, GError **error)
 		for (guint i = 0; i < devices_no_upgrades->len; i++) {
 			FwupdDevice *dev = g_ptr_array_index(devices_no_upgrades, i);
 			g_printerr(" • %s\n", fwupd_device_get_name(dev));
-		}
-	}
-	if (devices_inhibited->len > 0) {
-		/* TRANSLATORS: the device has a reason it can't update, e.g. laptop lid closed */
-		g_printerr("%s\n", _("Devices not currently updatable:"));
-		for (guint i = 0; i < devices_inhibited->len; i++) {
-			FwupdDevice *dev = g_ptr_array_index(devices_inhibited, i);
-			g_printerr(" • %s — %s\n",
-				   fwupd_device_get_name(dev),
-				   fwupd_device_get_update_error(dev));
 		}
 	}
 
@@ -2324,6 +2309,20 @@ fu_util_update_device_with_release(FuUtilPrivate *priv,
 				   FwupdRelease *rel,
 				   GError **error)
 {
+	if (!fwupd_device_has_flag(dev, FWUPD_DEVICE_FLAG_UPDATABLE)) {
+		const gchar *name = fwupd_device_get_name(dev);
+		g_autofree gchar *str = NULL;
+
+		/* TRANSLATORS: the device has a reason it can't update, e.g. laptop lid closed */
+		str = g_strdup_printf(_("%s is not currently updatable"), name);
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_NOTHING_TO_DO,
+			    "%s: %s",
+			    str,
+			    fwupd_device_get_update_error(dev));
+		return FALSE;
+	}
 	if (!priv->no_safety_check && !priv->assume_yes) {
 		g_autofree gchar *title = fu_util_get_tree_title(priv);
 		if (!fu_util_prompt_warning(dev, rel, title, error))
@@ -2419,7 +2418,8 @@ fu_util_update(FuUtilPrivate *priv, gchar **values, GError **error)
 		gboolean dev_skip_byid = TRUE;
 
 		/* not going to have results, so save a D-Bus round-trip */
-		if (!fwupd_device_has_flag(dev, FWUPD_DEVICE_FLAG_UPDATABLE))
+		if (!fwupd_device_has_flag(dev, FWUPD_DEVICE_FLAG_UPDATABLE) &&
+		    !fwupd_device_has_flag(dev, FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN))
 			continue;
 		if (!fwupd_device_has_flag(dev, FWUPD_DEVICE_FLAG_SUPPORTED)) {
 			if (!no_updates_header) {
@@ -4470,7 +4470,7 @@ main(int argc, char *argv[])
 			FWUPD_FEATURE_FLAG_CAN_REPORT | FWUPD_FEATURE_FLAG_SWITCH_BRANCH |
 			    FWUPD_FEATURE_FLAG_REQUESTS | FWUPD_FEATURE_FLAG_UPDATE_ACTION |
 			    FWUPD_FEATURE_FLAG_FDE_WARNING | FWUPD_FEATURE_FLAG_DETACH_ACTION |
-			    FWUPD_FEATURE_FLAG_COMMUNITY_TEXT,
+			    FWUPD_FEATURE_FLAG_COMMUNITY_TEXT | FWUPD_FEATURE_FLAG_SHOW_INHIBITS,
 			priv->cancellable,
 			&error)) {
 			g_printerr("Failed to set front-end features: %s\n", error->message);
