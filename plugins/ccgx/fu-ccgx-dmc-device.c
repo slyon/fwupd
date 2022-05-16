@@ -618,10 +618,11 @@ fu_ccgx_dmc_device_attach(FuDevice *device, FuProgress *progress, GError **error
 
 	if (manual_replug) {
 		fu_device_add_flag(device, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION);
-		fu_device_inhibit(device,
-				  "update-pending",
-				  "A pending update will be completed next time the device "
-				  "is unplugged from your computer");
+		fu_device_inhibit_full(device,
+				       FWUPD_DEVICE_INHIBIT_KIND_UPDATE_PENDING,
+				       NULL,
+				       "A pending update will be completed next time the device "
+				       "is unplugged from your computer");
 	} else {
 		fu_device_add_flag(device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
 	}

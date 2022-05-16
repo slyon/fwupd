@@ -87,6 +87,7 @@ typedef struct {
 } FuDeviceRetryRecovery;
 
 typedef struct {
+	FwupdDeviceInhibitKind inhibit_kind;
 	gchar *inhibit_id;
 	gchar *reason;
 } FuDeviceInhibit;
@@ -1280,7 +1281,10 @@ fu_device_add_child(FuDevice *self, FuDevice *child)
 		g_autoptr(GList) values = g_hash_table_get_values(priv->inhibits);
 		for (GList *l = values; l != NULL; l = l->next) {
 			FuDeviceInhibit *inhibit = (FuDeviceInhibit *)l->data;
-			fu_device_inhibit(child, inhibit->inhibit_id, inhibit->reason);
+			fu_device_inhibit_full(child,
+					       inhibit->inhibit_kind,
+					       inhibit->inhibit_id,
+					       inhibit->reason);
 		}
 	}
 
@@ -2625,6 +2629,7 @@ static void
 fu_device_ensure_inhibits(FuDevice *self)
 {
 	FuDevicePrivate *priv = GET_PRIVATE(self);
+	FwupdDeviceInhibitKind inhibit_kinds = FWUPD_DEVICE_INHIBIT_KIND_NONE;
 	guint nr_inhibits = g_hash_table_size(priv->inhibits);
 
 	/* disable */
@@ -2648,6 +2653,7 @@ fu_device_ensure_inhibits(FuDevice *self)
 		for (GList *l = values; l != NULL; l = l->next) {
 			FuDeviceInhibit *inhibit = (FuDeviceInhibit *)l->data;
 			g_ptr_array_add(reasons, inhibit->reason);
+			inhibit_kinds |= inhibit->inhibit_kind;
 		}
 		reasons_str = fu_common_strjoin_array(", ", reasons);
 		fu_device_set_update_error(self, reasons_str);
@@ -2659,9 +2665,75 @@ fu_device_ensure_inhibits(FuDevice *self)
 		fu_device_set_update_error(self, NULL);
 	}
 
+	/* sync with baseclass */
+	fwupd_device_set_inhibit_kinds(FWUPD_DEVICE(self), inhibit_kinds);
+
 	/* enable */
 	if (priv->notify_flags_handler_id != 0)
 		g_signal_handler_unblock(self, priv->notify_flags_handler_id);
+}
+
+/**
+ * fu_device_inhibit_full:
+ * @self: a #FuDevice
+ * @inhibit_kind: a #FwupdDeviceInhibitKind, e.g. %FWUPD_DEVICE_INHIBIT_KIND_SYSTEM_POWER_TOO_LOW
+ * @inhibit_id: (nullable): an optional ID used for uninhibiting, e.g. `low-power`
+ * @reason: (nullable): a string, e.g. `Cannot update as foo [bar] needs reboot`
+ *
+ * Prevent the device from being updated, changing it from %FWUPD_DEVICE_FLAG_UPDATABLE
+ * to %FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN if not already inhibited.
+ *
+ * If the device already has an inhibit with the same @inhibit_id then the request
+ * is ignored.
+ *
+ * Since: 1.8.1
+ **/
+void
+fu_device_inhibit_full(FuDevice *self,
+		       FwupdDeviceInhibitKind inhibit_kind,
+		       const gchar *inhibit_id,
+		       const gchar *reason)
+{
+	FuDevicePrivate *priv = GET_PRIVATE(self);
+	FuDeviceInhibit *inhibit;
+
+	g_return_if_fail(FU_IS_DEVICE(self));
+
+	/* lazy create as most devices will not need this */
+	if (priv->inhibits == NULL) {
+		priv->inhibits = g_hash_table_new_full(g_str_hash,
+						       g_str_equal,
+						       NULL,
+						       (GDestroyNotify)fu_device_inhibit_free);
+	}
+
+	/* can fallback to the kind */
+	if (inhibit_id == NULL)
+		inhibit_id = fwupd_device_inhibit_kind_to_string(inhibit_kind);
+
+	/* already exists */
+	inhibit = g_hash_table_lookup(priv->inhibits, inhibit_id);
+	if (inhibit != NULL)
+		return;
+
+	/* create new */
+	inhibit = g_new0(FuDeviceInhibit, 1);
+	inhibit->inhibit_kind = inhibit_kind;
+	inhibit->inhibit_id = g_strdup(inhibit_id);
+	inhibit->reason = g_strdup(reason);
+	g_hash_table_insert(priv->inhibits, inhibit->inhibit_id, inhibit);
+
+	/* refresh */
+	fu_device_ensure_inhibits(self);
+
+	/* propagate to children */
+	if (fu_device_has_internal_flag(self, FU_DEVICE_INTERNAL_FLAG_INHIBIT_CHILDREN)) {
+		GPtrArray *children = fu_device_get_children(self);
+		for (guint i = 0; i < children->len; i++) {
+			FuDevice *child = g_ptr_array_index(children, i);
+			fu_device_inhibit(child, inhibit_id, reason);
+		}
+	}
 }
 
 /**
@@ -2681,42 +2753,9 @@ fu_device_ensure_inhibits(FuDevice *self)
 void
 fu_device_inhibit(FuDevice *self, const gchar *inhibit_id, const gchar *reason)
 {
-	FuDevicePrivate *priv = GET_PRIVATE(self);
-	FuDeviceInhibit *inhibit;
-
 	g_return_if_fail(FU_IS_DEVICE(self));
 	g_return_if_fail(inhibit_id != NULL);
-
-	/* lazy create as most devices will not need this */
-	if (priv->inhibits == NULL) {
-		priv->inhibits = g_hash_table_new_full(g_str_hash,
-						       g_str_equal,
-						       NULL,
-						       (GDestroyNotify)fu_device_inhibit_free);
-	}
-
-	/* already exists */
-	inhibit = g_hash_table_lookup(priv->inhibits, inhibit_id);
-	if (inhibit != NULL)
-		return;
-
-	/* create new */
-	inhibit = g_new0(FuDeviceInhibit, 1);
-	inhibit->inhibit_id = g_strdup(inhibit_id);
-	inhibit->reason = g_strdup(reason);
-	g_hash_table_insert(priv->inhibits, inhibit->inhibit_id, inhibit);
-
-	/* refresh */
-	fu_device_ensure_inhibits(self);
-
-	/* propagate to children */
-	if (fu_device_has_internal_flag(self, FU_DEVICE_INTERNAL_FLAG_INHIBIT_CHILDREN)) {
-		GPtrArray *children = fu_device_get_children(self);
-		for (guint i = 0; i < children->len; i++) {
-			FuDevice *child = g_ptr_array_index(children, i);
-			fu_device_inhibit(child, inhibit_id, reason);
-		}
-	}
+	fu_device_inhibit_full(self, FWUPD_DEVICE_INHIBIT_KIND_NONE, inhibit_id, reason);
 }
 
 /**
@@ -2741,6 +2780,27 @@ fu_device_has_inhibit(FuDevice *self, const gchar *inhibit_id)
 	if (priv->inhibits == NULL)
 		return FALSE;
 	return g_hash_table_contains(priv->inhibits, inhibit_id);
+}
+
+/**
+ * fu_device_uninhibit_by_kind:
+ * @self: a #FuDevice
+ * @inhibit_kind: a #FwupdDeviceInhibitKind, e.g. %FWUPD_DEVICE_INHIBIT_KIND_SYSTEM_POWER_TOO_LOW
+ *
+ * Allow the device from being updated if there are no other inhibitors,
+ * changing it from %FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN to %FWUPD_DEVICE_FLAG_UPDATABLE.
+ *
+ * If the device already has no inhibit with the @inhibit_id then the request
+ * is ignored.
+ *
+ * Since: 1.8.1
+ **/
+void
+fu_device_uninhibit_by_kind(FuDevice *self, FwupdDeviceInhibitKind inhibit_kind)
+{
+	g_return_if_fail(FU_IS_DEVICE(self));
+	g_return_if_fail(inhibit_kind != FWUPD_DEVICE_INHIBIT_KIND_UNKNOWN);
+	return fu_device_uninhibit(self, fwupd_device_inhibit_kind_to_string(inhibit_kind));
 }
 
 /**
@@ -3091,8 +3151,12 @@ fu_device_add_flag(FuDevice *self, FwupdDeviceFlags flag)
 		fu_device_inhibit(self, "needs-activation", "Pending activation");
 
 	/* do not let devices be updated until back in range */
-	if (flag & FWUPD_DEVICE_FLAG_UNREACHABLE)
-		fu_device_inhibit(self, "unreachable", "Device is unreachable");
+	if (flag & FWUPD_DEVICE_FLAG_UNREACHABLE) {
+		fu_device_inhibit_full(self,
+				       FWUPD_DEVICE_INHIBIT_KIND_UNREACHABLE,
+				       NULL,
+				       "Device is unreachable");
+	}
 }
 
 typedef struct {
@@ -3327,10 +3391,13 @@ fu_device_ensure_battery_inhibit(FuDevice *self)
 	FuDevicePrivate *priv = GET_PRIVATE(self);
 	if (priv->battery_level == FU_BATTERY_VALUE_INVALID ||
 	    priv->battery_level >= fu_device_get_battery_threshold(self)) {
-		fu_device_uninhibit(self, "battery");
+		fu_device_uninhibit_by_kind(self, FWUPD_DEVICE_INHIBIT_KIND_POWER_TOO_LOW);
 		return;
 	}
-	fu_device_inhibit(self, "battery", "Battery level is too low");
+	fu_device_inhibit_full(self,
+			       FWUPD_DEVICE_INHIBIT_KIND_POWER_TOO_LOW,
+			       NULL,
+			       "Battery level is too low");
 }
 
 /**

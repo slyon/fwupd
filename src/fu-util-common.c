@@ -1303,6 +1303,40 @@ fu_util_update_state_to_string(FwupdUpdateState update_state)
 	return NULL;
 }
 
+static gchar *
+fu_util_device_inhibit_kind_to_string(guint64 device_inhibit_kind)
+{
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_NONE)
+		return NULL;
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_SYSTEM_POWER_TOO_LOW) {
+		/* TRANSLATORS: as in laptop battery power */
+		return _("The system power is too low to perform the update");
+	}
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_UNREACHABLE) {
+		/* TRANSLATORS: for example, a BlueTooth mouse that is in powersave mode */
+		return _("The device is unreachable, or out of wireless range");
+	}
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_POWER_TOO_LOW) {
+		/* TRANSLATORS: for example the batteries *inside* the BlueTooth mouse */
+		return _("The device battery power is too low");
+	}
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_UPDATE_PENDING) {
+		/* TRANSLATORS: usually this is when we're waiting for a reboot */
+		return _("The device is waiting for the update to be applied");
+	}
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_REQUIRE_AC_POWER) {
+		/* TRANSLATORS: as in, wired mains power for a laptop */
+		return _("The device requires AC power to be connected");
+	}
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_LID_IS_CLOSED) {
+		/* TRANSLATORS: lid means "laptop top cover" */
+		return _("The device cannot be used while the lid is closed");
+	}
+	if (device_inhibit_kind == FWUPD_DEVICE_INHIBIT_KIND_UNKNOWN)
+		return NULL;
+	return NULL;
+}
+
 gchar *
 fu_util_device_to_string(FwupdDevice *dev, guint idt)
 {
@@ -1314,6 +1348,7 @@ fu_util_device_to_string(FwupdDevice *dev, guint idt)
 	const gchar *tmp;
 	const gchar *tmp2;
 	guint64 flags = fwupd_device_get_flags(dev);
+	guint64 inhibit_kinds = fwupd_device_get_inhibit_kinds(dev);
 	guint64 modified = fwupd_device_get_modified(dev);
 	g_autoptr(GHashTable) ids = NULL;
 	g_autoptr(GString) str = g_string_new(NULL);
@@ -1522,6 +1557,22 @@ fu_util_device_to_string(FwupdDevice *dev, guint idt)
 			fu_common_string_append_kv(str, idt + 1, "", bullet);
 		}
 	}
+
+	if (inhibit_kinds != FWUPD_DEVICE_INHIBIT_KIND_NONE) {
+		/* TRANSLATORS: reasons the device is not updatable */
+		tmp = _("Inhibits");
+		for (guint i = 0; i < 64; i++) {
+			g_autofree gchar *bullet = NULL;
+			if ((flags & ((guint64)1 << i)) == 0)
+				continue;
+			tmp2 = fu_util_device_inhibit_kind_to_string((guint64)1 << i);
+			if (tmp2 == NULL)
+				continue;
+			bullet = g_strdup_printf("• %s", tmp2);
+			fu_common_string_append_kv(str, idt + 1, tmp, bullet);
+		}
+	}
+
 	for (guint i = 0; i < issues->len; i++) {
 		const gchar *issue = g_ptr_array_index(issues, i);
 		fu_common_string_append_kv(str,

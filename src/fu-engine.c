@@ -292,11 +292,14 @@ fu_engine_ensure_device_battery_inhibit(FuEngine *self, FuDevice *device)
 	if (fu_device_has_flag(device, FWUPD_DEVICE_FLAG_REQUIRE_AC) &&
 	    (fu_context_get_battery_state(self->ctx) == FU_BATTERY_STATE_DISCHARGING ||
 	     fu_context_get_battery_state(self->ctx) == FU_BATTERY_STATE_EMPTY)) {
-		fu_device_inhibit(device,
-				  "battery-system",
-				  "Cannot install update when not on AC power");
-		return;
+		fu_device_inhibit_full(device,
+				       FWUPD_DEVICE_INHIBIT_KIND_REQUIRE_AC_POWER,
+				       NULL,
+				       "Cannot install update when not on AC power");
+	} else {
+		fu_device_uninhibit_by_kind(device, FWUPD_DEVICE_INHIBIT_KIND_REQUIRE_AC_POWER);
 	}
+
 	if (fu_context_get_battery_level(self->ctx) != FU_BATTERY_VALUE_INVALID &&
 	    fu_context_get_battery_threshold(self->ctx) != FU_BATTERY_VALUE_INVALID &&
 	    fu_context_get_battery_level(self->ctx) < fu_context_get_battery_threshold(self->ctx)) {
@@ -304,10 +307,13 @@ fu_engine_ensure_device_battery_inhibit(FuEngine *self, FuDevice *device)
 		reason = g_strdup_printf(
 		    "Cannot install update when system battery is not at least %u%%",
 		    fu_context_get_battery_threshold(self->ctx));
-		fu_device_inhibit(device, "battery-system", reason);
-		return;
+		fu_device_inhibit_full(device,
+				       FWUPD_DEVICE_INHIBIT_KIND_SYSTEM_POWER_TOO_LOW,
+				       NULL,
+				       reason);
+	} else {
+		fu_device_uninhibit_by_kind(device, FWUPD_DEVICE_INHIBIT_KIND_SYSTEM_POWER_TOO_LOW);
 	}
-	fu_device_uninhibit(device, "battery-system");
 }
 
 static void
@@ -315,12 +321,13 @@ fu_engine_ensure_device_lid_inhibit(FuEngine *self, FuDevice *device)
 {
 	if (fu_device_has_internal_flag(device, FU_DEVICE_INTERNAL_FLAG_NO_LID_CLOSED) &&
 	    fu_context_get_lid_state(self->ctx) == FU_LID_STATE_CLOSED) {
-		fu_device_inhibit(device,
-				  "lid-closed-system",
-				  "Cannot install update when the lid is closed");
+		fu_device_inhibit_full(device,
+				       FWUPD_DEVICE_INHIBIT_KIND_LID_IS_CLOSED,
+				       NULL,
+				       "Cannot install update when the lid is closed");
 		return;
 	}
-	fu_device_uninhibit(device, "lid-closed-system");
+	fu_device_uninhibit_by_kind(device, FWUPD_DEVICE_INHIBIT_KIND_LID_IS_CLOSED);
 }
 
 static void

@@ -762,3 +762,15 @@ LIBFWUPD_1.8.0 {
     fwupd_client_get_only_trusted;
   local: *;
 } LIBFWUPD_1.7.6;
+
+LIBFWUPD_1.8.1 {
+  global:
+    fwupd_device_add_inhibit_kind;
+    fwupd_device_get_inhibit_kinds;
+    fwupd_device_has_inhibit_kind;
+    fwupd_device_inhibit_kind_from_string;
+    fwupd_device_inhibit_kind_to_string;
+    fwupd_device_remove_inhibit_kind;
+    fwupd_device_set_inhibit_kinds;
+  local: *;
+} LIBFWUPD_1.8.0;
