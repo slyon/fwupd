@@ -482,5 +482,21 @@ G_BEGIN_DECLS
  * The D-Bus type signature string is 's' i.e. a string.
  **/
 #define FWUPD_RESULT_KEY_VERSION "Version"
+/**
+ * FWUPD_RESULT_KEY_BATTERY_LEVEL:
+ *
+ * Result key to represent the battery level in percent.
+ *
+ * The D-Bus type signature string is 'u' i.e. a unsigned 32 bit integer.
+ **/
+#define FWUPD_RESULT_KEY_BATTERY_LEVEL "BatteryLevel"
+/**
+ * FWUPD_RESULT_KEY_BATTERY_THRESHOLD:
+ *
+ * Result key to represent the battery threshold in percent.
+ *
+ * The D-Bus type signature string is 'u' i.e. a unsigned 32 bit integer.
+ **/
+#define FWUPD_RESULT_KEY_BATTERY_THRESHOLD "BatteryThreshold"
 
 G_END_DECLS
